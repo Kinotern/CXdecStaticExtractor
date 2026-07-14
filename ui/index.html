@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HXV4 XP3 Extractor</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">HX</div>
+      <div>
+        <h1>HXV4 XP3</h1>
+        <p>本地静态解包工具</p>
+      </div>
+    </div>
+
+    <nav>
+      <button class="nav-item active" data-page="scheme">方案库</button>
+      <button class="nav-item" data-page="queue">队列</button>
+    </nav>
+  </aside>
+
+  <main class="shell">
+    <section class="topbar">
+      <div>
+        <h2 id="pageTitle">方案库</h2>
+        <p id="pageSubtitle">选择已有方案，或把草稿方案恢复成可用方案。</p>
+      </div>
+    </section>
+
+    <section class="page active" id="scheme">
+      <div class="scheme-layout">
+        <section class="panel scheme-list-panel">
+          <div class="panel-title">
+            <span>已有方案</span>
+            <div>
+              <small id="schemeCount">0 个方案</small>
+              <button id="openCreateModal" class="primary small-btn" style="padding: 4px 10px; font-size: 12px; margin-left: 10px;">添加方案</button>
+            </div>
+          </div>
+          <div id="schemeList" class="scheme-list"></div>
+        </section>
+
+        <section class="panel scheme-detail-panel">
+          <div class="step-head">
+            <div class="step-badge">i</div>
+            <div>
+              <h3>方案详情</h3>
+              <p>确认这个方案对应的游戏、版本、LST 和 DRIP 文件。</p>
+            </div>
+          </div>
+
+          <div class="detail-stack">
+            <div class="detail-row">
+              <span>方案 ID</span>
+              <strong id="detailIdText">未选择</strong>
+            </div>
+            <div class="detail-row">
+              <span>实际文件夹名</span>
+              <strong id="detailFolderName">未选择</strong>
+            </div>
+            <div class="detail-row">
+              <span>方案状态</span>
+              <strong id="detailReadyState">未选择</strong>
+            </div>
+          </div>
+
+          <div class="rename-box">
+            <div class="panel-title compact-title">
+              <span>重命名方案</span>
+              <small>会同步目录名和文件名前缀</small>
+            </div>
+            <div class="rename-fields">
+              <label class="field">
+                <span>会社名</span>
+                <input id="editCompanyName" placeholder="如 YuzuSoft" />
+              </label>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <label class="field" style="margin-bottom: 0;">
+                  <span>游戏名</span>
+                  <input id="editGameName" />
+                </label>
+                <label class="field" style="margin-bottom: 0;">
+                  <span>版本名</span>
+                  <input id="editVersionName" />
+                </label>
+              </div>
+            </div>
+            <div class="rename-preview">
+              <span>保存后目录</span>
+              <small id="renamePreview">-</small>
+            </div>
+          </div>
+
+          <div class="detail-actions">
+            <button class="secondary wide" id="renameScheme">保存名称</button>
+          </div>
+
+
+          <button class="ghost wide" id="deleteScheme" style="color: #ef4444; margin-top: 10px; border: 1px solid #fee2e2; background: #fef2f2;">删除此方案</button>
+        </section>
+      </div>
+    </section>
+
+    <!-- Create Scheme Modal -->
+    <dialog id="createSchemeModal" class="modal">
+      <div class="modal-box panel">
+        <div class="step-head" style="margin-bottom: 20px;">
+          <div class="step-badge">+</div>
+          <div>
+            <h3>创建新方案</h3>
+            <p>填写并创建新方案，完成后会自动切换。</p>
+          </div>
+          <button id="closeCreateModal" class="ghost" style="margin-left: auto; width: 32px; height: 32px; padding: 0;">&times;</button>
+        </div>
+
+        <label class="field">
+          <span>游戏 EXE</span>
+          <div class="browse-row">
+            <input id="newExePath" placeholder="先选择游戏主程序" />
+            <button data-pick="schemeExe">选择</button>
+          </div>
+        </label>
+
+        <div class="rename-fields">
+          <label class="field">
+            <span>会社名（可选）</span>
+            <input id="newCompanyName" placeholder="例如 YuzuSoft" />
+          </label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <label class="field" style="margin-bottom: 0;">
+              <span>游戏名</span>
+              <input id="newGameName" placeholder="例如 CafeStella" />
+            </label>
+            <label class="field" style="margin-bottom: 0;">
+              <span>版本名</span>
+              <input id="newVersionName" value="Local" placeholder="例如 HF、Steam..." />
+            </label>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>LST 文件名表（可选）</span>
+          <div class="browse-row">
+            <input id="newLstPath" placeholder="没有就先留空，之后仍可补" />
+            <button data-pick="schemeLst">选择</button>
+          </div>
+        </label>
+
+        <div class="create-preview">
+          <div>
+            <span>将创建为</span>
+            <strong id="previewTitle">等待填写</strong>
+          </div>
+          <div>
+            <span>方案 ID</span>
+            <small id="previewId">-</small>
+          </div>
+          <div>
+            <span>目录结构</span>
+            <small id="previewFolder">-</small>
+          </div>
+        </div>
+
+        <button class="primary wide" id="createScheme">创建并切换到新方案</button>
+      </div>
+    </dialog>
+
+    <!-- Create Sub-version Modal -->
+    <dialog id="createSubVersionModal" class="modal">
+      <div class="modal-box panel">
+        <div class="step-head" style="margin-bottom: 20px;">
+          <div class="step-badge">+</div>
+          <div>
+            <h3>新建子版本</h3>
+            <p>继承原方案的密钥和规则，建立新的版本分支。</p>
+          </div>
+          <button id="closeSubModal" class="ghost" style="margin-left: auto; width: 32px; height: 32px; padding: 0;">&times;</button>
+        </div>
+
+        <div class="rename-preview" style="margin-bottom: 16px;">
+          <span>继承自</span>
+          <strong id="subBaseGame" style="display: block; font-size: 15px; margin-top: 4px;">-</strong>
+        </div>
+
+        <label class="field">
+          <span>新版本名</span>
+          <input id="subVersionName" placeholder="例如 Steam、DLsite..." />
+        </label>
+
+        <label class="field">
+          <span>游戏 EXE (必须选择)</span>
+          <div class="browse-row">
+            <input id="subExePath" placeholder="请选择新版本对应的游戏程序" />
+            <button data-pick="subExe">选择</button>
+          </div>
+        </label>
+
+        <button class="primary wide" id="createSubVersion">创建子版本</button>
+      </div>
+    </dialog>
+
+    <!-- Queue page -->
+    <section class="page" id="queue">
+      <div class="queue-toolbar">
+        <button class="primary" id="openAddQueueModal">➕ 添加 XP3</button>
+        <button class="secondary" id="runQueue" disabled>▶ 全部运行</button>
+        <button class="ghost" id="clearQueue">清空队列</button>
+
+        <div style="margin-left: 20px; display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 13px; color: var(--muted);">导出目录:</span>
+          <input id="queueOutRootPath" readonly style="width: 200px; font-size: 12px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface-soft);" />
+          <button class="secondary small-btn" data-pick="queueOutRoot" style="padding: 4px 10px; font-size: 12px;">更改</button>
+        </div>
+        <span id="queueStats" style="margin-left: auto; color: var(--muted); font-size: 13px;">
+          <span id="queueGlobalProgress" style="display:none; color: #3b82f6; font-weight: bold; margin-right: 8px;">总进度: 0%</span>
+          <span id="queueCount">0</span> 个任务
+        </span>
+      </div>
+      <div id="queueList" class="queue-list">
+        <div class="queue-empty">
+          <div style="font-size: 48px; margin-bottom: 12px;">📦</div>
+          <p>还没有队列项目</p>
+          <small>点击「添加 XP3」开始添加封包</small>
+        </div>
+      </div>
+    </section>
+
+    <!-- Add Queue Item Modal -->
+    <dialog id="addQueueModal" class="modal">
+      <div class="modal-box panel" style="width: 520px;">
+        <div class="step-head" style="margin-bottom: 20px;">
+          <div class="step-badge">➕</div>
+          <div>
+            <h3>添加 XP3 到队列</h3>
+            <p>选择方案和 XP3 文件，输出路径自动计算。</p>
+          </div>
+          <button id="closeAddQueueModal" class="ghost" style="margin-left: auto; width: 32px; height: 32px; padding: 0;">&times;</button>
+        </div>
+
+        <label class="field">
+          <span>方案</span>
+          <select id="queueSchemeSelect"></select>
+        </label>
+
+        <div class="queue-scheme-preview" id="queueSchemePreview" style="display:none; margin-bottom: 12px; padding: 10px; background: var(--surface); border-radius: 8px; font-size: 13px; color: var(--muted);">
+          <strong id="queuePreviewName" style="display: block; color: var(--text); margin-bottom: 0;"></strong>
+        </div>
+
+        <label class="field">
+          <span>XP3 文件（可多选）</span>
+          <div class="browse-row">
+            <input id="queueXp3Paths" placeholder="选择一个或多个 .xp3 文件" readonly />
+            <button data-pick="queueXp3">选择</button>
+          </div>
+        </label>
+
+        <div id="queueXp3List" style="display: none; margin-bottom: 12px;">
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 6px; display: flex; justify-content: space-between;">
+            <span>已选 XP3 文件：</span>
+            <span id="clearQueueXp3Btn" style="color: #ef4444; cursor: pointer;">清空选中</span>
+          </div>
+          <div id="queueXp3Items" style="display: grid; gap: 4px; max-height: 120px; overflow-y: auto;"></div>
+        </div>
+
+        <div class="rename-preview" id="queueOutPreview" style="margin-bottom: 16px; display: none;">
+          <span>输出目录（示例）</span>
+          <small id="queueOutPreviewText">-</small>
+        </div>
+
+        <button class="primary wide" id="confirmAddQueue">添加到队列</button>
+      </div>
+    </dialog>
+    
+    <!-- Loading Overlay for UI Protection -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+      <div class="loading-box">
+        <h3 id="loadingTitle">正在处理...</h3>
+        <p id="loadingText">请稍候，由于文件较多可能需要一些时间。</p>
+        <div class="progress-container">
+          <progress id="progressBar" value="0" max="100"></progress>
+          <span id="progressText">0 / 0</span>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    setTimeout(() => {
+      post({ type: "ready" }); // Just in case
+      const dump = document.body.innerHTML;
+      fetch('http://127.0.0.1:9999', { method: 'POST', body: dump }).catch(e=>{});
+    }, 1000);
+  </script>
+</body>
+</html>

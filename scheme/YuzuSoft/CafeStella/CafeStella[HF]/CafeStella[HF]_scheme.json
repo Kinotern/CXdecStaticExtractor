@@ -1,0 +1,62 @@
+{
+    "bootstrap": {
+        "archive_seed": "",
+        "archive_unique_key": "{Kanna*Natsume*Nozomi*Mei*Suzune}",
+        "config_table_rva": "",
+        "prefix": "Cafe Stella and the Reapers Butterflies (C)YUZUSOFT/JUNOS INC. All Rights Reserved.",
+        "warning": "Warning! Extracting this game data may infringe on author's rights."
+    },
+    "bres": {
+        "bootstrap_key": "daagz6fftpcf5ayewqa7246z6w",
+        "bootstrap_url": "bres://./daagz6fftpcf5ayewqa7246z6w/bootstrap",
+        "bootstrap_zlib_offset": 8,
+        "salt": {
+            "mode": "auto",
+            "size": 8192,
+            "verified_file_offset": "",
+            "verified_rva": ""
+        },
+        "startup_key": "xfgp9i53ygpktxjfjyzcjf5hg2"
+    },
+    "company": "YuzuSoft",
+    "derive": {
+        "drip_program": "CafeStella[HF]_drip_program.json",
+        "mode": "external FilterManagerDerive via static_xp3_recover.py"
+    },
+    "engine": "Kirikiri/Krkrz XP3 HXV4",
+    "exe": {
+        "default_path": "CafeStella.exe",
+        "note": "created from local executable",
+        "sha256": "c66c5a96fbe717abbb59f86b7ec390eb10aa89e53ab0d13f0eec4963d986ec3e"
+    },
+    "game": "CafeStella",
+    "hxv4": {
+        "key": "77987faf3a8bb3ec9c31ec618319360721ab314cb2198cf10d96fed40affcc24",
+        "nonce0": "7ae70eab3e7cb0028bb9c15fd2c965890bab13edba0bd2bb",
+        "nonce1": "524ce3acd0bfd8a906654cc06fb462deaf978684e3ee7cd8",
+        "open_flag_source": "descriptor.flags & 1"
+    },
+    "id": "yuzusoft-cafestella-hf",
+    "lst": "../../../CafeStella.lst",
+    "name": "YuzuSoft CafeStella [HF] HXV4",
+    "resources": {
+        "bootstrap": {
+            "name": "BOOTSTRAP",
+            "type": "RCDATA"
+        },
+        "plugin": {
+            "name": "PLUGIN",
+            "optional": true,
+            "type": "RCDATA"
+        },
+        "startup": {
+            "name": "STARTUP.TJS",
+            "type": "RCDATA"
+        },
+        "text": {
+            "name": "127",
+            "type": "TEXT"
+        }
+    },
+    "version": "HF"
+}
