@@ -78,7 +78,14 @@ pub fn decrypt_hxv4_payload(
     let cipher = XChaCha20Poly1305::new(Key::from_slice(key_bytes));
     let nonce = XNonce::from_slice(nonce_bytes);
 
-    let decrypted = cipher.decrypt(nonce, payload)
+    // Rearrange from [MAC (16 bytes) | Ciphertext] to [Ciphertext | MAC (16 bytes)]
+    let mac = &payload[0..16];
+    let ciphertext = &payload[16..];
+    let mut rust_aead_payload = vec![0u8; ciphertext.len() + 16];
+    rust_aead_payload[0..ciphertext.len()].copy_from_slice(ciphertext);
+    rust_aead_payload[ciphertext.len()..].copy_from_slice(mac);
+
+    let decrypted = cipher.decrypt(nonce, rust_aead_payload.as_slice())
         .map_err(|_| "Hxv4 Payload MAC verification failed!".to_string())?;
 
     Ok(decrypted)
