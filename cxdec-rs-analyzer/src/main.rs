@@ -342,12 +342,164 @@ fn derive_drip(dll_path: &PathBuf, bootstrap_bytes: &[u8], params_bytes: &[u8], 
     }
 }
 
+#[repr(C, packed)]
+struct SteamStub32Var31Header {
+    xor_key: u32,
+    signature: u32,
+    image_base: u64,
+    address_of_entry_point: u64,
+    bind_section_offset: u32,
+    unknown0000: u32,
+    original_entry_point: u64,
+    unknown0001: u32,
+    payload_size: u32,
+    drmp_dll_offset: u32,
+    drmp_dll_size: u32,
+    steam_app_id: u32,
+    flags: u32,
+    bind_section_virtual_size: u32,
+    unknown0002: u32,
+    code_section_virtual_address: u64,
+    code_section_raw_size: u64,
+    aes_key: [u8; 32],
+    aes_iv: [u8; 16],
+    code_section_stolen_data: [u8; 16],
+    encryption_keys: [u32; 4],
+    unknown0003: [u32; 8],
+    get_module_handle_a_rva: u64,
+    get_module_handle_w_rva: u64,
+    load_library_a_rva: u64,
+    load_library_w_rva: u64,
+    get_proc_address_rva: u64,
+}
+
+fn steam_xor(data: &mut [u8], key: &mut u32) {
+    let mut offset = 0;
+    if *key == 0 {
+        offset = 4;
+        *key = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    }
+    for x in (offset..data.len()).step_by(4) {
+        if x + 4 <= data.len() {
+            let val = u32::from_le_bytes(data[x..x+4].try_into().unwrap());
+            let plain = val ^ *key;
+            data[x..x+4].copy_from_slice(&plain.to_le_bytes());
+            *key = val;
+        }
+    }
+}
+
+fn aes_256_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], ciphertext: &mut [u8]) -> Result<(), String> {
+    use aes::Aes256;
+    use cbc::Decryptor;
+    use cbc::cipher::{BlockDecryptMut, KeyIvInit};
+
+    type Aes256CbcDec = Decryptor<Aes256>;
+
+    let decryptor = Aes256CbcDec::new(key.into(), iv.into());
+    decryptor.decrypt_padded_mut::<cbc::cipher::block_padding::NoPadding>(ciphertext)
+        .map_err(|e| format!("AES decryption error: {:?}", e))?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     fs::create_dir_all(&args.work_dir)?;
     
-    let file_map = pelite::FileMap::open(&args.exe)?;
-    let pe = PeFile::from_bytes(&file_map)?;
+    let mut file_data = fs::read(&args.exe)?;
+    
+    // SteamStub Decryption
+    let pe_temp = PeFile::from_bytes(&file_data)?;
+    let mut is_steam = false;
+    let mut bind_section_info = None;
+    
+    for s in pe_temp.section_headers() {
+        let name = String::from_utf8_lossy(&s.Name);
+        if name.starts_with(".bind") {
+            is_steam = true;
+            bind_section_info = Some((s.VirtualAddress, s.VirtualSize, s.PointerToRawData, s.SizeOfRawData));
+            break;
+        }
+    }
+    
+    if is_steam {
+        println!("检测到 SteamStub 保护，正在进行内存解壳与代码段还原...");
+        if let Some((bind_va, bind_vsize, _, _)) = bind_section_info {
+            let oep = pe_temp.optional_header().AddressOfEntryPoint;
+            let mut check_oep_va = oep;
+            
+            // Check if TLS callbacks exist, check TLS as fallback
+            if !(check_oep_va >= bind_va && check_oep_va < bind_va + bind_vsize) {
+                if let Ok(tls) = pe_temp.tls() {
+                    if let Ok(callbacks) = tls.callbacks() {
+                        if let Some(&callback) = callbacks.first() {
+                            if callback != 0 {
+                                check_oep_va = callback - pe_temp.optional_header().ImageBase as u32;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if check_oep_va >= bind_va && check_oep_va < bind_va + bind_vsize {
+                if let Ok(oep_offset) = pe_temp.rva_to_file_offset(check_oep_va) {
+                    let oep_offset = oep_offset as usize;
+                    if oep_offset >= 240 {
+                        let mut header_bytes = file_data[oep_offset - 240 .. oep_offset].to_vec();
+                        let mut xor_key = 0;
+                        steam_xor(&mut header_bytes, &mut xor_key);
+                        
+                        let header: SteamStub32Var31Header = unsafe {
+                            std::ptr::read_unaligned(header_bytes.as_ptr() as *const SteamStub32Var31Header)
+                        };
+                        
+                        let signature = header.signature;
+                        let steam_app_id = header.steam_app_id;
+                        let aes_key = header.aes_key;
+                        let aes_iv = header.aes_iv;
+                        let stolen_data = header.code_section_stolen_data;
+                        let code_va = header.code_section_virtual_address as u32;
+                        let code_size = header.code_section_raw_size as usize;
+                        
+                        if signature == 0xC0DEC0DF {
+                            println!("SteamStub Variant 3.1 签名验证成功。Steam AppID: {}", steam_app_id);
+                            
+                            // Find code section
+                            let mut code_section_info = None;
+                            for s in pe_temp.section_headers() {
+                                let vsize = if s.VirtualSize == 0 { s.SizeOfRawData } else { s.VirtualSize };
+                                if code_va >= s.VirtualAddress && code_va < s.VirtualAddress + vsize {
+                                    code_section_info = Some((s.PointerToRawData as usize, s.SizeOfRawData as usize));
+                                    break;
+                                }
+                            }
+                            
+                            if let Some((code_raw_offset, code_raw_size)) = code_section_info {
+                                let read_size = std::cmp::min(code_size, code_raw_size);
+                                
+                                // Construct cipher buffer: stolen data (16 bytes) + encrypted code
+                                let mut cipher_buf = vec![0u8; 16 + read_size];
+                                cipher_buf[0..16].copy_from_slice(&stolen_data);
+                                cipher_buf[16..].copy_from_slice(&file_data[code_raw_offset .. code_raw_offset + read_size]);
+                                
+                                if aes_256_cbc_decrypt(&aes_key, &aes_iv, &mut cipher_buf).is_ok() {
+                                    println!("代码段 AES 解密还原成功，覆盖映射中。");
+                                    // Overwrite the file_data code section with decrypted data (skipping stolen block output)
+                                    file_data[code_raw_offset .. code_raw_offset + read_size].copy_from_slice(&cipher_buf[16 .. 16 + read_size]);
+                                } else {
+                                    println!("警告: 代码段 AES 解密失败！");
+                                }
+                            }
+                        } else {
+                            println!("警告: SteamStub 签名验证失败，可能为未支持的 Variant 版本。");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    let pe = PeFile::from_bytes(&file_data)?;
     
     let root_url = get_text_127(&pe).unwrap_or_default();
     let startup_key = root_url.replace("bres://./", "").trim_matches('/').to_string();
@@ -409,6 +561,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "bootstrap_prefix": bootstrap_prefix,
         "warning": warning,
         "archive_unique_key": unique,
+        "is_steam": is_steam,
         "outputs": {
             "dll": dll_path.to_string_lossy(),
             "drip_program": out_path.to_string_lossy()

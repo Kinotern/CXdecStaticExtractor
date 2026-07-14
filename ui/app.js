@@ -173,9 +173,11 @@ function renderSchemes() {
         const btn = document.createElement("button");
         btn.className = "scheme-item" + (scheme.id === state.selectedSchemeId ? " active" : "");
         const ready = isSchemeReady(scheme);
+        const steamTag = scheme.isSteam ? " <span style='font-size:10px; background:#1b2838; color:#c7d5e0; padding:1px 4px; border-radius:3px; margin-left:4px;'>Steam</span>" : "";
         btn.innerHTML =
           "<strong>" +
           (scheme.version || "默认版本") +
+          steamTag +
           "</strong><span style='" +
           (ready ? "color:#10b981;font-weight:bold" : "") +
           "'>" +
@@ -219,6 +221,14 @@ function selectScheme(id) {
     $("#detailReadyState").textContent = ready ? "可行 (已配置密钥)" : "草稿，需要先恢复写入";
     $("#detailReadyState").style.color = ready ? "#10b981" : "";
   }
+  if ($("#detailSteamRow")) {
+    if (scheme.isSteam) {
+      $("#detailSteamRow").style.display = "flex";
+      $("#detailSteamText").textContent = "是";
+    } else {
+      $("#detailSteamRow").style.display = "none";
+    }
+  }
   if ($("#editCompanyName")) $("#editCompanyName").value = scheme.company || "";
   if ($("#editGameName")) $("#editGameName").value = scheme.game || "";
   if ($("#editVersionName")) $("#editVersionName").value = scheme.version || "";
@@ -257,6 +267,8 @@ function updateRenamePreview() {
 ["#editCompanyName", "#editGameName", "#editVersionName"].forEach((sel) => {
   if ($(sel)) $(sel).addEventListener("input", updateRenamePreview);
 });
+
+
 
 function openCreateGameModal(companyName) {
   if ($("#newCompanyName")) $("#newCompanyName").value = companyName || "";
@@ -304,7 +316,6 @@ if ($("#renameScheme")) $("#renameScheme").addEventListener("click", () => {
 if ($("#deleteScheme")) $("#deleteScheme").addEventListener("click", () => {
   const scheme = selectedScheme();
   if (!scheme) return;
-  if (!confirm("确认要删除方案 \"" + scheme.name + "\" 吗？\n删除后不可恢复。")) return;
   post({ type: "deleteScheme", schemeId: scheme.id });
 });
 

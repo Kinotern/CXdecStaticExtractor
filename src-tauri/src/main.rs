@@ -50,6 +50,7 @@ struct Scheme {
     version: Option<String>,
     has_drip: bool,
     has_hxv4_key: bool,
+    is_steam: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -90,11 +91,12 @@ fn get_schemes() -> Vec<Scheme> {
                         let version = json["version"].as_str().map(|s| s.to_string());
                         let has_drip = json["derive"]["drip_program"].is_string();
                         let has_hxv4_key = json["hxv4"]["key"].is_string();
+                        let is_steam = json["is_steam"].as_bool();
 
                         app_log(&format!("[OK] Loaded scheme: {} from {:?}", id, entry.path()));
 
                         schemes.push(Scheme {
-                            id, company, game, name, version, has_drip, has_hxv4_key,
+                            id, company, game, name, version, has_drip, has_hxv4_key, is_steam,
                         });
                     }
                     Err(e) => {
@@ -271,57 +273,101 @@ fn handle_post_message(message: serde_json::Value, window: tauri::Window) {
             let mut scheme_dir = std::env::current_exe().unwrap_or_default().parent().unwrap_or(std::path::Path::new("")).join("scheme");
             if !scheme_dir.exists() { scheme_dir = std::path::PathBuf::from("../scheme"); }
             
+            let mut scheme_name = "未知方案".to_string();
+            let mut found_path = None;
+            let mut drip_program = None;
+            
             for entry in walkdir::WalkDir::new(&scheme_dir).into_iter().filter_map(|e| e.ok()) {
                 if entry.file_name().to_string_lossy().ends_with("_scheme.json") {
                     if let Ok(content) = std::fs::read_to_string(entry.path()) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
                             if json["id"].as_str().unwrap_or("") == scheme_id {
-                                if let Some(version_path) = entry.path().parent() {
-                                    app_log(&format!("Deleting scheme files in: {:?}", version_path));
-                                    
-                                    // C++ Logic: only delete generated files, then remove directories if empty
-                                    let _ = std::fs::remove_file(entry.path()); // _scheme.json
-                                    
-                                    if let Some(drip_name) = json["derive"]["drip_program"].as_str() {
-                                        let drip_path = version_path.join(drip_name);
-                                        let _ = std::fs::remove_file(&drip_path);
-                                        let _ = std::fs::remove_file(drip_path.with_extension("bin"));
-                                    }
-                                    
-                                    // Also remove summary if it exists
-                                    let prefix = version_path.file_name().unwrap().to_string_lossy();
-                                    let _ = std::fs::remove_file(version_path.join(format!("{}_static_recover.summary.json", prefix)));
-                                    
-                                    // Attempt to remove empty directories (version -> game -> company)
-                                    if std::fs::read_dir(version_path).map(|mut i| i.next().is_none()).unwrap_or(false) {
-                                        let _ = std::fs::remove_dir(version_path);
-                                        if let Some(game_path) = version_path.parent() {
-                                            if std::fs::read_dir(game_path).map(|mut i| i.next().is_none()).unwrap_or(false) {
-                                                let _ = std::fs::remove_dir(game_path);
-                                                if let Some(company_path) = game_path.parent() {
-                                                    if std::fs::read_dir(company_path).map(|mut i| i.next().is_none()).unwrap_or(false) {
-                                                        let _ = std::fs::remove_dir(company_path);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    deleted = true;
-                                    break;
-                                }
+                                scheme_name = json["name"].as_str().unwrap_or("未知方案").to_string();
+                                found_path = Some(entry.path().to_path_buf());
+                                drip_program = json["derive"]["drip_program"].as_str().map(|s| s.to_string());
+                                break;
                             }
                         }
                     }
                 }
             }
+            
+            if let Some(path) = found_path {
+                use tauri::api::dialog::blocking::MessageDialogBuilder;
+                use tauri::api::dialog::{MessageDialogButtons, MessageDialogKind};
+                
+                let confirm = MessageDialogBuilder::new(
+                    "确认要删除方案吗？",
+                    &format!("确认要删除方案 \"{}\" 吗？\n删除后不可恢复。", scheme_name)
+                )
+                .buttons(MessageDialogButtons::YesNo)
+                .kind(MessageDialogKind::Warning)
+                .show();
+                
+                if confirm {
+                    let version_path = path.parent().unwrap();
+                    app_log(&format!("Deleting scheme files in: {:?}", version_path));
+                    
+                    let _ = std::fs::remove_file(&path); // _scheme.json
+                    
+                    if let Some(drip_name) = drip_program {
+                        let drip_path = version_path.join(drip_name);
+                        let _ = std::fs::remove_file(&drip_path);
+                        let _ = std::fs::remove_file(drip_path.with_extension("bin"));
+                    }
+                    
+                    let prefix = version_path.file_name().unwrap().to_string_lossy();
+                    let _ = std::fs::remove_file(version_path.join(format!("{}_static_recover.summary.json", prefix)));
+                    
+                    if std::fs::read_dir(version_path).map(|mut i| i.next().is_none()).unwrap_or(false) {
+                        let _ = std::fs::remove_dir(version_path);
+                        if let Some(game_path) = version_path.parent() {
+                            if std::fs::read_dir(game_path).map(|mut i| i.next().is_none()).unwrap_or(false) {
+                                let _ = std::fs::remove_dir(game_path);
+                                if let Some(company_path) = game_path.parent() {
+                                    if std::fs::read_dir(company_path).map(|mut i| i.next().is_none()).unwrap_or(false) {
+                                        let _ = std::fs::remove_dir(company_path);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    deleted = true;
+                }
+            }
+            
             let msg = if deleted {
                 app_log(&format!("[OK] Scheme {} successfully deleted.", scheme_id));
                 serde_json::json!({ "type": "schemeDeleted", "ok": true, "message": "方案已删除", "schemes": get_schemes() })
             } else {
-                app_log(&format!("[ERROR] Scheme {} not found for deletion.", scheme_id));
-                serde_json::json!({ "type": "schemeDeleted", "ok": false, "message": "找不到该方案" })
+                app_log(&format!("[ERROR] Scheme {} not found for deletion or cancelled.", scheme_id));
+                serde_json::json!({ "type": "schemeDeleted", "ok": false, "message": "已取消删除或方案不存在" })
             };
             let _ = window.emit("backend-message", msg);
+        } else if msg_type == "duplicateScheme" {
+            let base_id = message.get("baseSchemeId").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let new_ver = message.get("newVersion").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let new_exe = message.get("newExe").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            
+            let window_clone = window.clone();
+            std::thread::spawn(move || {
+                let res = duplicate_scheme(window_clone.clone(), &base_id, &new_ver, &new_exe);
+                let msg = match res {
+                    Ok((new_id, msg_str)) => serde_json::json!({
+                        "type": "schemeDuplicated",
+                        "ok": true,
+                        "message": msg_str,
+                        "schemes": get_schemes(),
+                        "scheme": { "id": new_id }
+                    }),
+                    Err(e) => serde_json::json!({
+                        "type": "schemeDuplicated",
+                        "ok": false,
+                        "message": format!("子版本创建失败: {}", e)
+                    })
+                };
+                let _ = window_clone.emit("backend-message", msg);
+            });
         } else if msg_type == "renameScheme" {
             let scheme_id = message.get("schemeId").and_then(|t| t.as_str()).unwrap_or("");
             let company = message.get("company").and_then(|t| t.as_str()).unwrap_or("");
@@ -380,6 +426,140 @@ fn handle_post_message(message: serde_json::Value, window: tauri::Window) {
             run_extract_queue(window, vec![ExtractItem { id, path: xp3, scheme: scheme_id, out_dir: out }]);
         }
     }
+}
+
+fn duplicate_scheme(
+    window: tauri::Window,
+    base_scheme_id: &str,
+    new_version: &str,
+    new_exe: &str,
+) -> Result<(String, String), String> {
+    let exe_dir = std::env::current_exe().unwrap_or_default().parent().unwrap_or(std::path::Path::new("")).to_path_buf();
+    let mut scheme_dir = exe_dir.join("scheme");
+    if !scheme_dir.exists() { scheme_dir = std::path::PathBuf::from("../scheme"); }
+    
+    let mut base_scheme_path = None;
+    let mut base_folder = None;
+    
+    for entry in walkdir::WalkDir::new(&scheme_dir).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_name().to_string_lossy().ends_with("_scheme.json") {
+            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if json["id"].as_str().unwrap_or("") == base_scheme_id {
+                        base_scheme_path = Some(entry.path().to_path_buf());
+                        base_folder = Some(entry.path().parent().unwrap().to_path_buf());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    let base_scheme_path = base_scheme_path.ok_or_else(|| "未找到基础方案".to_string())?;
+    let base_folder = base_folder.ok_or_else(|| "未找到基础方案文件夹".to_string())?;
+    
+    let base_content = std::fs::read_to_string(&base_scheme_path).map_err(|e| e.to_string())?;
+    let mut base_json: serde_json::Value = serde_json::from_str(&base_content).map_err(|e| e.to_string())?;
+    
+    let company = base_json["company"].as_str().unwrap_or("").to_string();
+    let game = base_json["game"].as_str().unwrap_or("").to_string();
+    let version = new_version.trim().to_string();
+    
+    let disp_name = format!("{} {} {} HXV4", company, game, version).trim().to_string();
+    
+    let raw_id = format!("{} {} {}", company, game, version).to_lowercase();
+    let new_id = raw_id.replace(|c: char| !c.is_alphanumeric() && c != ' ', "").replace(" ", "-");
+    
+    let clean_company = company.replace(|c: char| !c.is_alphanumeric() && c != ' ', "").trim().to_string();
+    let clean_game = game.replace(|c: char| !c.is_alphanumeric() && c != ' ', "").trim().to_string();
+    let clean_version = version.replace(|c: char| !c.is_alphanumeric() && c != ' ', "").trim().to_string();
+    
+    let mut folder = scheme_dir.clone();
+    if !clean_company.is_empty() {
+        folder = folder.join(&clean_company);
+    }
+    folder = folder.join(&clean_game);
+    
+    let version_dir = format!("{}[{}]", clean_game, clean_version);
+    folder = folder.join(&version_dir);
+    
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    
+    let new_scheme_path = folder.join(format!("{}_scheme.json", version_dir));
+    
+    let mut new_lst_rel = "".to_string();
+    if let Some(base_lst) = base_json["lst"].as_str() {
+        if !base_lst.is_empty() {
+            let src_lst = base_folder.join(base_lst);
+            if src_lst.exists() && src_lst.is_file() {
+                let dest_lst = folder.join(src_lst.file_name().unwrap());
+                let _ = std::fs::copy(&src_lst, &dest_lst);
+                new_lst_rel = dest_lst.file_name().unwrap().to_string_lossy().to_string();
+            }
+        }
+    }
+    
+    if let Some(obj) = base_json.as_object_mut() {
+        obj.insert("id".to_string(), serde_json::json!(new_id));
+        obj.insert("name".to_string(), serde_json::json!(disp_name));
+        obj.insert("version".to_string(), serde_json::json!(version));
+        obj.insert("lst".to_string(), serde_json::json!(new_lst_rel));
+        
+        if let Some(exe_obj) = obj.get_mut("exe").and_then(|v| v.as_object_mut()) {
+            let new_exe_path = std::path::Path::new(new_exe);
+            exe_obj.insert("default_path".to_string(), serde_json::json!(new_exe_path.file_name().unwrap_or_default().to_string_lossy().to_string()));
+            
+            if let Ok(mut file) = std::fs::File::open(new_exe) {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                let mut buf = vec![0u8; 8192];
+                while let Ok(n) = std::io::Read::read(&mut file, &mut buf) {
+                    if n == 0 { break; }
+                    hasher.update(&buf[..n]);
+                }
+                let hash = hasher.finalize();
+                let hash_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+                exe_obj.insert("sha256".to_string(), serde_json::json!(hash_hex));
+            }
+        }
+        
+        if let Some(derive_obj) = obj.get_mut("derive").and_then(|v| v.as_object_mut()) {
+            derive_obj.insert("drip_program".to_string(), serde_json::json!(format!("{}_drip_program.json", version_dir)));
+        }
+    }
+    
+    std::fs::write(&new_scheme_path, serde_json::to_string_pretty(&base_json).unwrap()).map_err(|e| e.to_string())?;
+    
+    let new_drip_path = folder.join(format!("{}_drip_program.json", version_dir));
+    let mut copied_drip = false;
+    if let Some(base_drip_name) = base_json["derive"]["drip_program"].as_str() {
+        let src_drip = base_folder.join(base_drip_name);
+        if src_drip.exists() && src_drip.is_file() {
+            if std::fs::copy(&src_drip, &new_drip_path).is_ok() {
+                copied_drip = true;
+                let src_bin = src_drip.with_extension("bin");
+                if src_bin.exists() && src_bin.is_file() {
+                    let _ = std::fs::copy(&src_bin, new_drip_path.with_extension("bin"));
+                }
+            }
+        }
+    }
+    
+    if !copied_drip {
+        let drip_content = serde_json::json!({
+            "holder_words": [],
+            "context_u32": [],
+            "lanes": [],
+            "hxv4_key": "",
+            "hxv4_nonce0": "",
+            "hxv4_nonce1": ""
+        });
+        std::fs::write(&new_drip_path, serde_json::to_string_pretty(&drip_content).unwrap()).map_err(|e| e.to_string())?;
+    }
+    
+    let _ = run_static_recover(&new_id, new_exe, &window);
+    
+    Ok((new_id, format!("子版本已创建并自动提取完成: {}", disp_name)))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -472,6 +652,7 @@ fn create_scheme_from_exe(window: tauri::Window, options: CreateSchemeOptions) -
         "company": company,
         "game": game,
         "version": version,
+        "is_steam": false,
         "engine": "Kirikiri/Krkrz XP3 HXV4",
         "lst": lst_rel,
         "exe": {
@@ -788,6 +969,12 @@ fn run_static_recover(scheme_id: &str, exe_path: &str, window: &tauri::Window) -
 
     if let Some(derive_obj) = scheme_json.get_mut("derive").and_then(|v| v.as_object_mut()) {
         derive_obj.insert("drip_program".to_string(), serde_json::json!(target_drip.file_name().unwrap().to_string_lossy().to_string()));
+    }
+
+    if let Some(is_s) = summary_json.get("is_steam").and_then(|v| v.as_bool()) {
+        if let Some(obj) = scheme_json.as_object_mut() {
+            obj.insert("is_steam".to_string(), serde_json::json!(is_s));
+        }
     }
 
     let _ = std::fs::write(&scheme_path, serde_json::to_string_pretty(&scheme_json).unwrap());

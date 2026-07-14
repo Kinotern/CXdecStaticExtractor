@@ -12,4 +12,6 @@ sha3 = "0.10"
 clap = { version = "4.0", features = ["derive"] }
 windows = { version = "0.48", features = ["Win32_System_LibraryLoader", "Win32_Foundation", "Win32_System_Memory"] }
 hex = "0.4"
+aes = "0.8"
+cbc = "0.1"
 
