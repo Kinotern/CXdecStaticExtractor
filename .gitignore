@@ -1,8 +1,12 @@
 # Rust build artifacts
 target/
+Release/
+scheme/Cxdecanalyzer.exe
 
 # Node/Frontend dependencies (if any are introduced later)
 node_modules/
+dist/
+build/
 
 # OS-specific files
 .DS_Store
