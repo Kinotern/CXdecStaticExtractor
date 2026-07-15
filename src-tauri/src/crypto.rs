@@ -198,6 +198,7 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+#[allow(dead_code)]
 pub fn parse_hxv4_table(
     blob: &[u8],
     index_blob: &[u8],
@@ -217,10 +218,23 @@ pub fn parse_hxv4_table(
     }
 
     let payload = &blob[(desc.offset as usize)..(end as usize)];
-    println!("DEBUG: desc.offset = {}, size = {}", desc.offset, desc.size);
+    parse_hxv4_table_payload(payload, desc.flags, entries, custom_key, custom_nonce0, custom_nonce1)
+}
+
+pub fn parse_hxv4_table_payload(
+    payload: &[u8],
+    flags: u16,
+    entries: &[Xp3Entry],
+    custom_key: &[u8],
+    custom_nonce0: &[u8],
+    custom_nonce1: &[u8],
+) -> Result<Vec<Hxv4Record>, String> {
+    if payload.len() < 16 {
+        return Err("truncated Hxv4 payload".to_string());
+    }
     println!("DEBUG: payload MAC = {:?}", &payload[0..16]);
 
-    let decrypted = decrypt_hxv4_payload(payload, desc.flags, custom_key, custom_nonce0, custom_nonce1)?;
+    let decrypted = decrypt_hxv4_payload(payload, flags, custom_key, custom_nonce0, custom_nonce1)?;
 
     if decrypted.len() < 4 {
         return Err("truncated decrypted Hxv4 payload".into());

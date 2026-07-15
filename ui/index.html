@@ -19,6 +19,7 @@
     <nav>
       <button class="nav-item active" data-page="scheme">方案库</button>
       <button class="nav-item" data-page="queue">队列</button>
+      <button class="nav-item" data-page="lstrecovery">LST 制作</button>
     </nav>
   </aside>
 
@@ -107,6 +108,23 @@
         </section>
       </div>
     </section>
+
+    <!-- Log Output Modal -->
+    <dialog id="logModal" class="modal">
+      <div class="modal-box panel" style="width: 800px; max-width: 90vw;">
+        <div class="step-head" style="margin-bottom: 10px;">
+          <div class="step-badge">📜</div>
+          <div>
+            <h3 id="logModalTitle">正在生成 LST...</h3>
+            <p>实时日志输出</p>
+          </div>
+          <button id="closeLogModal" class="ghost" style="margin-left: auto; width: 32px; height: 32px; padding: 0; display: none;">&times;</button>
+        </div>
+        <div class="log-container" style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 8px; height: 400px; overflow-y: auto; font-family: Consolas, monospace; font-size: 12px; white-space: pre-wrap; line-height: 1.4;">
+          <div id="logOutput"></div>
+        </div>
+      </div>
+    </dialog>
 
     <!-- Create Scheme Modal -->
     <dialog id="createSchemeModal" class="modal">
@@ -230,6 +248,68 @@
           <p>还没有队列项目</p>
           <small>点击「添加 XP3」开始添加封包</small>
         </div>
+      </div>
+    </section>
+
+    <!-- LST Recovery page -->
+    <section class="page" id="lstrecovery">
+      <div style="display: flex; flex-direction: column; gap: 16px; padding: 24px; height: 100%;">
+      <div class="panel" style="flex: 0 0 auto;">
+        <div class="step-head" style="margin-bottom: 20px;">
+          <div class="step-badge" style="background-color: #8b5cf6;">📜</div>
+          <div>
+            <h3>制作 / 补充 LST (哈希碰撞算法)</h3>
+            <p>扫描主程序目录下的 SCN 文件并自动还原提取 XP3 文件名。</p>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+          <label class="field" style="margin: 0;">
+            <span>选择游戏主程序 (EXE)</span>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="lstExePath" placeholder="点击选择游戏 EXE 文件..." readonly style="flex: 1; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer;" />
+              <button class="btn" data-pick="lstExe" style="padding: 8px 16px;">浏览</button>
+            </div>
+          </label>
+          <label class="field" style="margin: 0;">
+            <span>输出文件名 (自动存放到 lstoutput/)</span>
+            <input id="lstOutputName" placeholder="例如: default.lst" style="width: 100%;" />
+          </label>
+        </div>
+
+        <label class="field" style="margin-bottom: 16px;">
+          <span>基础 LST 文件 (可选，用于补充或合并新生成的文件名)</span>
+          <div class="browse-row">
+            <input id="lstBasePath" placeholder="不选择则为全新生成" readonly />
+            <button data-pick="lstBase">选择</button>
+            <button class="ghost" id="clearLstBaseBtn" style="color: #ef4444; border: 1px solid #fee2e2; background: #fef2f2; margin-left: 8px; padding: 0 12px; height: 32px; border-radius: 4px;">清除</button>
+          </div>
+        </label>
+
+        <div class="queue-scheme-preview" id="lstSchemePreview" style="display:none; margin-bottom: 20px; padding: 12px; background: var(--surface-soft); border-radius: 8px; border: 1px solid var(--line);">
+          <strong id="lstPreviewName" style="display: block; color: var(--ink); margin-bottom: 8px; font-size: 14px;"></strong>
+          <div style="font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <span style="font-weight: 500;">扫描目录:</span>
+            <span id="lstPreviewDir" style="user-select: all; background: #fff; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); flex: 1;"></span>
+          </div>
+          <div style="font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px;">
+            <span style="font-weight: 500; color: #8b5cf6;">保存路径:</span>
+            <span id="lstPreviewOut" style="user-select: all; background: #fff; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); border-color: #ddd6fe; flex: 1; color: #8b5cf6;"></span>
+          </div>
+        </div>
+
+        <button class="primary" id="generateLstBtnPage" style="width: 200px; height: 40px; font-size: 15px; background-color: #8b5cf6; border-color: #7c3aed;">
+          ▶ 开始扫描生成
+        </button>
+      </div>
+
+      <div class="panel" style="flex: 1 1 auto; display: flex; flex-direction: column; padding: 0; overflow: hidden; border: 1px solid var(--line);">
+        <div style="background: #f4f6fa; padding: 8px 16px; font-size: 13px; font-weight: 600; color: var(--ink); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center;">
+          <span>执行日志</span>
+          <button class="ghost" id="clearLstLogBtn" style="padding: 2px 8px; font-size: 12px;">清空</button>
+        </div>
+        <div id="lstPageLogOutput" style="background: #1e1e1e; color: #d4d4d4; padding: 12px 16px; flex: 1 1 auto; overflow-y: auto; font-family: Consolas, monospace; font-size: 13px; white-space: pre-wrap; line-height: 1.5;">等待执行...</div>
+      </div>
       </div>
     </section>
 

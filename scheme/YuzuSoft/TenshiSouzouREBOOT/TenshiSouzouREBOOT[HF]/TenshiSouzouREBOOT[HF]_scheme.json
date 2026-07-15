@@ -1,0 +1,61 @@
+{
+  "id": "yuzusoft_tenshisouzoureboot_hf",
+  "name": "YuzuSoft TenshiSouzouREBOOT HF HXV4",
+  "company": "YuzuSoft",
+  "game": "TenshiSouzouREBOOT",
+  "version": "HF",
+  "engine": "Kirikiri/Krkrz XP3 HXV4",
+  "lst": "../TenshiSouzouRE-BOOT.lst",
+  "exe": {
+    "note": "created from local executable",
+    "default_path": "tenshi_sz.exe",
+    "sha256": "0dde2d8702e9e906b87df1ec44a0b8108b35fa52be981e7f78ac7feab6107d02"
+  },
+  "resources": {
+    "startup": {
+      "name": "STARTUP.TJS",
+      "type": "RCDATA"
+    },
+    "plugin": {
+      "optional": true,
+      "name": "PLUGIN",
+      "type": "RCDATA"
+    },
+    "text": {
+      "name": "127",
+      "type": "TEXT"
+    },
+    "bootstrap": {
+      "name": "BOOTSTRAP",
+      "type": "RCDATA"
+    }
+  },
+  "bres": {
+    "bootstrap_url": "bres://./mk97tjege8m8itnxmsh6tqbwgw/bootstrap",
+    "bootstrap_zlib_offset": 8,
+    "bootstrap_key": "mk97tjege8m8itnxmsh6tqbwgw",
+    "startup_key": "wd26tgu2t6zt9ch2rcyqks6sj6",
+    "salt": {
+      "size": 8192,
+      "verified_file_offset": "",
+      "verified_rva": "",
+      "mode": "auto"
+    }
+  },
+  "bootstrap": {
+    "prefix": "TenshiSouzouReBoot! (C)YUZUSOFT/JUNOS/Nekonyan/HikariField INC. All Rights Reserved.",
+    "warning": "Warning! Extracting this game data may infringe on author's rights.",
+    "archive_seed": "",
+    "config_table_rva": "",
+    "archive_unique_key": "{Noa=Ama=Kur=Kag=Ori=Fum}"
+  },
+  "hxv4": {
+    "open_flag_source": "descriptor.flags & 1",
+    "nonce0": "b9ac287fb5e05f0d0df5e84edc361a79522f20d0a8e442e8",
+    "key": "f8b66f8b0aac0516d2a441ccde9bcc8fb37b3c44c81336a8803651a7f28f38b4",
+    "nonce1": "ec09241ae4e0b246ffe8bf524bf3c0a10672f12ba92bdebd"
+  },
+  "derive": {
+    "drip_program": "TenshiSouzouREBOOT[HF]_drip_program.json"
+  }
+}

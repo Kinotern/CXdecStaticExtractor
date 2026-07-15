@@ -1,0 +1,13 @@
+{
+  "callback_rva_base": 1543831552,
+  "source_module_base": 1543831552,
+  "context_va": 32899112,
+  "drip_impl_va": 22335472,
+  "hash_key": "073af30b8d93a533ec745c258486d5a695be1908b14f33787dc3ff0f067b2540",
+  "version": 1,
+  "hxv4_key": "f8b66f8b0aac0516d2a441ccde9bcc8fb37b3c44c81336a8803651a7f28f38b4",
+  "hxv4_nonce0": "b9ac287fb5e05f0d0df5e84edc361a79522f20d0a8e442e8",
+  "hxv4_nonce1": "ec09241ae4e0b246ffe8bf524bf3c0a10672f12ba92bdebd",
+  "source_module": "bootstrap.dll",
+  "manager_va": 32899072
+}

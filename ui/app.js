@@ -664,6 +664,20 @@ if (window.__TAURI__) {
       else if (msg.target === "subExe") {
         if ($("#subExePath")) $("#subExePath").value = msg.path;
       }
+      else if (msg.target === "lstExe") {
+        if ($("#lstExePath")) {
+          $("#lstExePath").value = msg.path;
+          const leaf = msg.path.split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
+          if ($("#lstOutputName")) $("#lstOutputName").value = leaf + "_lst.lst";
+          updateLstPreview();
+        }
+      }
+      else if (msg.target === "lstBase") {
+        if ($("#lstBasePath")) {
+          $("#lstBasePath").value = msg.path;
+          updateLstPreview();
+        }
+      }
       else if (msg.target === "queueOutRoot") {
         state.outRoot = msg.path;
         if ($("#queueOutRootPath")) $("#queueOutRootPath").value = state.outRoot;
@@ -673,6 +687,33 @@ if (window.__TAURI__) {
     
     else if (msg.type === "log") {
       appendLog(msg.text);
+    }
+    
+    else if (msg.type === "recoveryLog") {
+      if ($("#lstPageLogOutput")) {
+        if ($("#lstPageLogOutput").textContent === "等待执行...") {
+          $("#lstPageLogOutput").textContent = "";
+        }
+        $("#lstPageLogOutput").textContent += msg.text;
+        $("#lstPageLogOutput").scrollTop = $("#lstPageLogOutput").scrollHeight;
+      }
+      if ($("#logOutput")) {
+        $("#logOutput").textContent += msg.text;
+        $("#logOutput").parentElement.scrollTop = $("#logOutput").parentElement.scrollHeight;
+      }
+    }
+    
+    else if (msg.type === "recoveryDone") {
+      const statusText = msg.ok ? "\n\n[成功] LST 制作完成！\n" : `\n\n[失败] 发生错误: ${msg.error}\n`;
+      if ($("#lstPageLogOutput")) {
+        $("#lstPageLogOutput").textContent += statusText;
+        $("#lstPageLogOutput").scrollTop = $("#lstPageLogOutput").scrollHeight;
+      }
+      if ($("#logOutput")) {
+        $("#logOutput").textContent += statusText;
+        $("#logOutput").parentElement.scrollTop = $("#logOutput").parentElement.scrollHeight;
+      }
+      if ($("#closeLogModal")) $("#closeLogModal").style.display = "block";
     }
     
     else if (msg.type === "progress") {
@@ -713,6 +754,56 @@ if (window.__TAURI__) {
     }
   });
 }
+
+// ----- LST Recovery -----
+function updateLstPreview() {
+  const exePath = $("#lstExePath") ? $("#lstExePath").value : "";
+  const outputName = $("#lstOutputName") ? $("#lstOutputName").value : "";
+  const preview = $("#lstSchemePreview");
+  
+  if (exePath && outputName && preview) {
+    preview.style.display = "block";
+    if ($("#lstPreviewName")) $("#lstPreviewName").textContent = "将生成: " + outputName;
+    const dir = exePath.substring(0, exePath.lastIndexOf("\\")) || exePath.substring(0, exePath.lastIndexOf("/"));
+    if ($("#lstPreviewDir")) $("#lstPreviewDir").textContent = dir || exePath;
+    if ($("#lstPreviewOut")) $("#lstPreviewOut").textContent = "lstoutput\\" + outputName;
+  } else if (preview) {
+    preview.style.display = "none";
+  }
+}
+
+if ($("#lstOutputName")) $("#lstOutputName").addEventListener("input", updateLstPreview);
+if ($("#lstExePath")) $("#lstExePath").addEventListener("input", updateLstPreview);
+
+if ($("#clearLstBaseBtn")) $("#clearLstBaseBtn").addEventListener("click", () => {
+  if ($("#lstBasePath")) $("#lstBasePath").value = "";
+  updateLstPreview();
+});
+
+if ($("#generateLstBtnPage")) $("#generateLstBtnPage").addEventListener("click", () => {
+  const exePath = $("#lstExePath") ? $("#lstExePath").value : "";
+  const baseLst = $("#lstBasePath") ? $("#lstBasePath").value : "";
+  const outputName = $("#lstOutputName") ? $("#lstOutputName").value : "";
+  
+  if (!exePath) return alert("请先选择游戏主程序 (EXE)！");
+  if (!outputName) return alert("请输入输出文件名！");
+  
+  if ($("#logModal") && $("#logModal").showModal) $("#logModal").showModal();
+  if ($("#logOutput")) $("#logOutput").textContent = "开始提取参数并生成 LST...\n";
+  if ($("#lstPageLogOutput")) $("#lstPageLogOutput").textContent = "开始提取参数并生成 LST...\n";
+  if ($("#closeLogModal")) $("#closeLogModal").style.display = "none";
+  
+  post({
+    type: "generateLst",
+    exePath: exePath,
+    baseLst: baseLst,
+    outputName: outputName
+  });
+});
+
+if ($("#closeLogModal")) $("#closeLogModal").addEventListener("click", () => {
+  if ($("#logModal") && $("#logModal").close) $("#logModal").close();
+});
 
 // Initialization
 document.addEventListener("DOMContentLoaded", () => {

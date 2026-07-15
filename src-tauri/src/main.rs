@@ -10,11 +10,211 @@ mod xp3;
 mod vm;
 mod crypto;
 mod extractor;
+mod cxdec_tools;
+mod tauri_logger;
 
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
 static LOG_FILE_PATH: Lazy<Mutex<Option<std::path::PathBuf>>> = Lazy::new(|| Mutex::new(None));
+
+fn runtime_root() -> std::path::PathBuf {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(std::path::Path::to_path_buf));
+    if let Some(dir) = exe_dir.as_ref() {
+        if dir.join("scheme").is_dir() || dir.join("formats.json").is_file() {
+            return dir.clone();
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        if cwd.join("scheme").is_dir() || cwd.join("formats.json").is_file() {
+            return cwd;
+        }
+        if cwd.file_name().is_some_and(|name| name.eq_ignore_ascii_case("src-tauri")) {
+            if let Some(parent) = cwd.parent() {
+                if parent.join("scheme").is_dir() || parent.join("formats.json").is_file() {
+                    return parent.to_path_buf();
+                }
+            }
+        }
+    }
+
+    exe_dir.unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+fn executable_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+fn cleanup_temp_dir(path: &std::path::Path) {
+    if path.exists() {
+        if let Err(error) = std::fs::remove_dir_all(path) {
+            app_log(&format!("[WARN] Failed to clean temporary directory {:?}: {}", path, error));
+        }
+    }
+}
+
+fn locate_cxdec_analyzer(root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut candidates = vec![
+        root.join("scheme").join("Cxdecanalyzer.exe"),
+        root.join("cxdec-rs-analyzer")
+            .join("target")
+            .join("i686-pc-windows-msvc")
+            .join("release")
+            .join("Cxdecanalyzer.exe"),
+    ];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("scheme").join("Cxdecanalyzer.exe"));
+        }
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn extract_unique_with_analyzer(
+    root: &std::path::Path,
+    exe_path: &std::path::Path,
+    temp_dir: &std::path::Path,
+    window: &tauri::Window,
+) -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+
+    let analyzer = locate_cxdec_analyzer(root).ok_or_else(|| {
+        format!(
+            "找不到 Cxdecanalyzer.exe；已检查 {} 和开发构建目录",
+            root.join("scheme").display()
+        )
+    })?;
+    let args = [
+        "--exe".to_string(),
+        exe_path.to_string_lossy().to_string(),
+        "--work-dir".to_string(),
+        temp_dir.to_string_lossy().to_string(),
+    ];
+    let _ = window.emit("backend-message", serde_json::json!({
+        "type": "recoveryLog",
+        "text": format!("运行新 HXV4 静态分析器: {}\n工作缓存: {}\n", analyzer.display(), temp_dir.display())
+    }));
+
+    let output = Command::new(&analyzer)
+        .args(&args)
+        .creation_flags(0x08000000)
+        .output()
+        .map_err(|error| format!("启动 Cxdecanalyzer.exe 失败: {}", error))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stdout.is_empty() {
+        let _ = window.emit("backend-message", serde_json::json!({
+            "type": "recoveryLog", "text": stdout.to_string()
+        }));
+    }
+    if !stderr.is_empty() {
+        let _ = window.emit("backend-message", serde_json::json!({
+            "type": "recoveryLog", "text": stderr.to_string()
+        }));
+    }
+    if !output.status.success() {
+        return Err(format!(
+            "Cxdecanalyzer.exe 执行失败，退出码 {:?}: {}",
+            output.status.code(),
+            stderr.trim()
+        ));
+    }
+
+    let summary_path = temp_dir.join("static_recover.summary.json");
+    let summary_text = std::fs::read_to_string(&summary_path)
+        .map_err(|error| format!("分析器未生成有效摘要 {}: {}", summary_path.display(), error))?;
+    let summary: serde_json::Value = serde_json::from_str(&summary_text)
+        .map_err(|error| format!("分析器摘要 JSON 无效: {}", error))?;
+    let unique = summary
+        .get("archive_unique_key")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "分析器摘要缺少 archive_unique_key".to_string())?;
+    let unique = unique.to_string();
+    let exe_name = exe_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "无法取得 EXE 文件名".to_string())?;
+    let prefix = exe_name;
+    let source_drip = temp_dir.join("drip_program.json");
+    let target_drip = temp_dir.join(format!("{}_drip_program.json", prefix));
+    let target_summary = temp_dir.join(format!("{}_static_recover.summary.json", prefix));
+    let target_scheme = temp_dir.join(format!("{}_scheme.json", prefix));
+
+    let drip_text = std::fs::read_to_string(&source_drip)
+        .map_err(|error| format!("分析器未生成 drip_program.json: {}", error))?;
+    let drip: serde_json::Value = serde_json::from_str(&drip_text)
+        .map_err(|error| format!("drip_program.json 无效: {}", error))?;
+    std::fs::copy(&source_drip, &target_drip)
+        .map_err(|error| format!("保存临时 Drip 配置失败: {}", error))?;
+    if !convert_drip_json_to_bin(&target_drip) {
+        return Err("生成临时 Drip 二进制文件失败".to_string());
+    }
+    std::fs::copy(&summary_path, &target_summary)
+        .map_err(|error| format!("保存临时分析摘要失败: {}", error))?;
+
+    use sha2::{Digest, Sha256};
+    let exe_hash = std::fs::read(exe_path)
+        .map(|bytes| {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{:02x}", byte))
+                .collect::<String>()
+        })
+        .map_err(|error| format!("计算 EXE SHA-256 失败: {}", error))?;
+    let is_steam = summary.get("is_steam").and_then(|value| value.as_bool()).unwrap_or(false);
+    let scheme = serde_json::json!({
+        "id": prefix,
+        "name": prefix,
+        "company": "",
+        "game": prefix,
+        "version": if is_steam { "Steam" } else { "Local" },
+        "is_steam": is_steam,
+        "engine": "Kirikiri/Krkrz XP3 HXV4",
+        "exe": {
+            "default_path": prefix,
+            "sha256": exe_hash,
+            "note": "temporary LST analyzer scheme"
+        },
+        "bres": {
+            "startup_key": summary.get("startup_key").cloned().unwrap_or(serde_json::Value::String(String::new())),
+            "bootstrap_key": summary.get("bootstrap_key").cloned().unwrap_or(serde_json::Value::String(String::new())),
+            "bootstrap_url": summary.get("bootstrap_url").cloned().unwrap_or(serde_json::Value::String(String::new())),
+            "bootstrap_zlib_offset": 8,
+            "salt": { "mode": "auto", "size": 8192 }
+        },
+        "bootstrap": {
+            "prefix": summary.get("bootstrap_prefix").cloned().unwrap_or(serde_json::Value::String(String::new())),
+            "warning": summary.get("warning").cloned().unwrap_or(serde_json::Value::String(String::new())),
+            "archive_unique_key": unique.clone()
+        },
+        "hxv4": {
+            "key": drip.get("hxv4_key").cloned().unwrap_or(serde_json::Value::String(String::new())),
+            "nonce0": drip.get("hxv4_nonce0").cloned().unwrap_or(serde_json::Value::String(String::new())),
+            "nonce1": drip.get("hxv4_nonce1").cloned().unwrap_or(serde_json::Value::String(String::new())),
+            "open_flag_source": "descriptor.flags & 1"
+        },
+        "derive": {
+            "drip_program": target_drip.file_name().unwrap_or_default().to_string_lossy(),
+            "mode": "Cxdecanalyzer.exe temporary analysis"
+        }
+    });
+    std::fs::write(&target_scheme, serde_json::to_string_pretty(&scheme).unwrap())
+        .map_err(|error| format!("保存临时 Scheme 失败: {}", error))?;
+
+    let _ = std::fs::remove_file(source_drip);
+    let _ = std::fs::remove_file(summary_path);
+    let _ = std::fs::remove_file(temp_dir.join("bootstrap.dll"));
+    Ok(unique)
+}
 
 pub fn init_logger() {
     let exe_dir = std::env::current_exe().unwrap_or_default().parent().unwrap_or(std::path::Path::new("")).to_path_buf();
@@ -24,6 +224,7 @@ pub fn init_logger() {
     if let Ok(mut lock) = LOG_FILE_PATH.lock() {
         *lock = Some(log_path);
     }
+    tauri_logger::init();
 }
 
 pub fn app_log(msg: &str) {
@@ -202,6 +403,9 @@ fn handle_post_message(message: serde_json::Value, window: tauri::Window) {
     
     if let Some(msg_type) = message.get("type").and_then(|t| t.as_str()) {
         if msg_type == "ready" {
+            if let Ok(mut lock) = tauri_logger::LOG_WINDOW.lock() {
+                *lock = Some(window.clone());
+            }
             let schemes = get_schemes();
             let init_msg = serde_json::json!({
                 "type": "init",
@@ -214,7 +418,7 @@ fn handle_post_message(message: serde_json::Value, window: tauri::Window) {
             let target = message.get("target").and_then(|t| t.as_str()).unwrap_or("").to_string();
             let window_clone = window.clone();
             
-            if target == "schemeExe" || target == "subExe" {
+            if target == "schemeExe" || target == "subExe" || target == "lstExe" {
                 tauri::api::dialog::FileDialogBuilder::new().add_filter("Executable", &["exe"]).pick_file(move |file_path| {
                     if let Some(path) = file_path {
                         let _ = window_clone.emit("backend-message", serde_json::json!({
@@ -222,7 +426,7 @@ fn handle_post_message(message: serde_json::Value, window: tauri::Window) {
                         }));
                     }
                 });
-            } else if target == "schemeLst" {
+            } else if target == "schemeLst" || target == "lstBase" {
                 tauri::api::dialog::FileDialogBuilder::new().add_filter("List File", &["lst", "txt"]).pick_file(move |file_path| {
                     if let Some(path) = file_path {
                         let _ = window_clone.emit("backend-message", serde_json::json!({
@@ -424,6 +628,104 @@ fn handle_post_message(message: serde_json::Value, window: tauri::Window) {
             let out = message.get("out").and_then(|t| t.as_str()).unwrap_or("").to_string();
             let scheme_id = message.get("schemeId").and_then(|t| t.as_str()).map(|s| s.to_string());
             run_extract_queue(window, vec![ExtractItem { id, path: xp3, scheme: scheme_id, out_dir: out }]);
+        } else if msg_type == "generateLst" {
+            let exe_path = message.get("exePath").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let base_lst = message.get("baseLst").and_then(|t| t.as_str()).unwrap_or("").to_string();
+            let output_name = message.get("outputName").and_then(|t| t.as_str()).unwrap_or("default.lst").to_string();
+            
+            let window_clone = window.clone();
+            std::thread::spawn(move || {
+                let current_dir = runtime_root();
+                let out_dir = executable_dir().join("lstoutput");
+                if !out_dir.exists() {
+                    let _ = std::fs::create_dir_all(&out_dir);
+                }
+                
+                // Temporary analyzer/recovery artifacts always live next to the
+                // running hxv4xp3Extractor.exe, in both dev and release builds.
+                let temp_root = executable_dir().join("_temp");
+                let exe_name = std::path::Path::new(&exe_path)
+                    .file_name()
+                    .unwrap_or_default();
+                let temp_dir = temp_root.join(exe_name);
+                cleanup_temp_dir(&temp_dir);
+                if let Err(error) = std::fs::create_dir_all(&temp_dir) {
+                    let _ = window_clone.emit("backend-message", serde_json::json!({
+                        "type": "recoveryDone", "ok": false, "error": format!("创建临时方案目录失败: {}", error)
+                    }));
+                    return;
+                }
+                
+                let game_dir = std::path::PathBuf::from(&exe_path).parent().unwrap_or(std::path::Path::new("")).to_path_buf();
+                if game_dir.as_os_str().is_empty() || !game_dir.exists() {
+                    let _ = window_clone.emit("backend-message", serde_json::json!({
+                        "type": "recoveryDone", "ok": false, "error": "无法找到游戏目录，请确认 EXE 路径"
+                    }));
+                    cleanup_temp_dir(&temp_dir);
+                    return;
+                }
+
+                let hash_domain = match extract_unique_with_analyzer(
+                    &current_dir,
+                    std::path::Path::new(&exe_path),
+                    &temp_dir,
+                    &window_clone,
+                ) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        let _ = window_clone.emit("backend-message", serde_json::json!({
+                            "type": "recoveryDone", "ok": false, "error": format!("新 HXV4 分析器提取 UNIQUE 失败: {}", e)
+                        }));
+                        cleanup_temp_dir(&temp_dir);
+                        return;
+                    }
+                };
+
+                let exe_name_text = std::path::Path::new(&exe_path)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("game.exe");
+                let drip_path = temp_dir.join(format!("{}_drip_program.json", exe_name_text));
+                let scan_dir = temp_dir.join("scan");
+                let final_lst = out_dir.join(&output_name);
+                let base_lst_path = (!base_lst.is_empty()).then(|| std::path::Path::new(&base_lst));
+                let _ = window_clone.emit("backend-message", serde_json::json!({
+                    "type": "recoveryLog", "text": format!("游戏目录: {}\n临时方案: {}\nDrip 程序: {}\n扫描缓存: {}\nUNIQUE: {}\n基础 LST: {}\n", game_dir.display(), temp_dir.display(), drip_path.display(), scan_dir.display(), hash_domain, base_lst)
+                }));
+
+                let log_window = window_clone.clone();
+                let result = crate::cxdec_tools::lst_scanner::run(
+                    &game_dir,
+                    &scan_dir,
+                    &drip_path,
+                    &hash_domain,
+                    base_lst_path,
+                    &final_lst,
+                    move |text| {
+                        let _ = log_window.emit("backend-message", serde_json::json!({
+                            "type": "recoveryLog", "text": text
+                        }));
+                    },
+                );
+                match result {
+                    Ok(stats) => {
+                        let size = std::fs::metadata(&final_lst).map(|metadata| metadata.len()).unwrap_or(0);
+                        let _ = window_clone.emit("backend-message", serde_json::json!({
+                            "type": "recoveryLog",
+                            "text": format!("扫描完成: {} 个归档，{} 个索引条目，{} 个候选，恢复 {}，未恢复 {}\n实际读取正文: {} 个条目 / {} bytes\nLST 已生成: {} ({} bytes)\n", stats.archives, stats.files, stats.candidates, stats.restored, stats.unresolved, stats.entries_read, stats.bytes_read, final_lst.display(), size)
+                        }));
+                        cleanup_temp_dir(&temp_dir);
+                        let _ = window_clone.emit("backend-message", serde_json::json!({
+                            "type": "recoveryDone", "ok": true, "unique": hash_domain, "path": final_lst.to_string_lossy(), "size": size
+                        }));
+                    }
+                    Err(error) => {
+                        let _ = window_clone.emit("backend-message", serde_json::json!({
+                            "type": "recoveryDone", "ok": false, "error": error
+                        }));
+                    }
+                }
+            });
         }
     }
 }

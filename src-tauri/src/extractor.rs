@@ -8,7 +8,7 @@ use std::io::Read;
 
 use crate::xp3::Xp3Parser;
 use crate::vm::DripProgram;
-use crate::crypto::{parse_hxv4_table, Hxv4Record};
+use crate::crypto::{find_hxv4_descriptor, parse_hxv4_table_payload, Hxv4Record};
 
 #[derive(Debug, Clone)]
 struct FilterBoundary {
@@ -140,23 +140,26 @@ where
     std::fs::create_dir_all(&options.out_dir).map_err(|e| e.to_string())?;
 
     let drip = DripProgram::load(&options.drip_program_path)?;
-    let (info, entries, index_blob) = Xp3Parser::read_archive(&options.xp3_path).map_err(|e| format!("{:?}", e))?;
-
-    let mut file = File::open(&options.xp3_path).map_err(|e| e.to_string())?;
-    let mut blob = vec![0u8; info.size as usize];
-    file.read_exact(&mut blob).map_err(|e| e.to_string())?;
-
-    let records = match parse_hxv4_table(&blob, &index_blob, &entries, &drip.hxv4_key, &drip.hxv4_nonce0, &drip.hxv4_nonce1) {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(format!("HXV4 Parse Error: {:?}, IndexBlob Size: {}", e, index_blob.len()));
+    let (_info, entries, index_blob) = Xp3Parser::read_archive(&options.xp3_path).map_err(|e| format!("{:?}", e))?;
+    let desc = find_hxv4_descriptor(&index_blob);
+    let records = if let Some(desc) = desc.as_ref() {
+        use std::io::{Seek, SeekFrom};
+        let mut file = File::open(&options.xp3_path).map_err(|e| e.to_string())?;
+        file.seek(SeekFrom::Start(desc.offset)).map_err(|e| e.to_string())?;
+        let mut payload = vec![0u8; desc.size as usize];
+        file.read_exact(&mut payload).map_err(|e| e.to_string())?;
+        match parse_hxv4_table_payload(&payload, desc.flags, &entries, &drip.hxv4_key, &drip.hxv4_nonce0, &drip.hxv4_nonce1) {
+            Ok(records) => records,
+            Err(e) => return Err(format!("HXV4 Parse Error: {:?}, IndexBlob Size: {}", e, index_blob.len())),
         }
+    } else {
+        Vec::new()
     };
     
     let mut filter_states: HashMap<usize, FilterRuntimeState> = HashMap::new();
     let mut hxv4_records: HashMap<usize, Hxv4Record> = HashMap::new();
 
-    if let Some(desc) = crate::crypto::find_hxv4_descriptor(&index_blob) {
+    if let Some(desc) = desc {
         let open_flag = (desc.flags & 1) as u32;
         for rec in records {
             if let Some(idx) = rec.xp3_entry_index {
@@ -254,15 +257,17 @@ where
     }
     
     use rayon::prelude::*;
-    let blob_arc = Arc::new(blob);
-
     // Process files in parallel
     let result: Result<(), String> = entries.into_par_iter().enumerate().try_for_each(|(idx, entry)| {
+        use std::io::{Seek, SeekFrom};
+        let mut archive = File::open(&options.xp3_path).map_err(|e| e.to_string())?;
         let mut file_data = Vec::with_capacity(entry.original_size as usize);
         let mut logical_off = 0;
 
         for seg in &entry.segments {
-            let mut chunk = blob_arc[(seg.offset as usize)..((seg.offset + seg.archived_size) as usize)].to_vec();
+            archive.seek(SeekFrom::Start(seg.offset)).map_err(|e| e.to_string())?;
+            let mut chunk = vec![0u8; seg.archived_size as usize];
+            archive.read_exact(&mut chunk).map_err(|e| e.to_string())?;
             
             if seg.is_compressed() {
                 let mut uncompressed = Vec::with_capacity(seg.original_size as usize);
